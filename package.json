@@ -4,13 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start-watch": "tsc-watch --onsuccess 'node ./index.js'"
+    "start-watch": "tsc-watch --onSuccess \"node index.js\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@rkesters/dsp.ts": "0.0.3",
+    "canvas": "^2.6.1",
     "goertzeljs": "^4.2.2",
     "wav": "^1.0.2"
   },

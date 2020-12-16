@@ -22,48 +22,61 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-var wav_1 = __importDefault(require("wav"));
-var fs = __importStar(require("fs"));
-var goertzeljs_1 = __importDefault(require("goertzeljs"));
-console.log("loading file");
-var file = fs.createReadStream("./srs430.wav");
-var reader = new wav_1.default.Reader({});
-var detectionPeriod = 0.2; // seconds
-reader.on("format", function (format) {
-    console.log("format: " + JSON.stringify(format));
+const wav_1 = require("wav");
+const fs = __importStar(require("fs"));
+const goertzeljs_1 = __importDefault(require("goertzeljs"));
+const canvas_1 = require("canvas");
+console.log(`loading file`);
+const file = fs.createReadStream('./srs430.wav');
+const reader = new wav_1.Reader({});
+const detectionPeriod = 0.05; // seconds
+const chartSecondsPerYPixel = 0.1;
+const chartHeight = 200;
+reader.on('format', (format) => {
+    console.log(`format: ${JSON.stringify(format)}`);
     if (format.bitDepth !== 16) {
-        throw new Error("only 16-bit depth supported");
+        throw new Error(`only 16-bit depth supported`);
     }
-    var gz = new goertzeljs_1.default({
+    const gz = new goertzeljs_1.default({
         frequencies: [590, 650],
         sampleRate: format.sampleRate,
     });
-    var buffers = Array.from({ length: format.channels }, function (x, i) { return i; }).map(function (ch) { return []; });
-    var numSamples = 0;
-    var gzSamples = 0;
-    var sampleMag = 0;
-    var samplesPerDetection = format.sampleRate * detectionPeriod;
-    reader.on("data", function (chunk) {
-        var offset = 0;
+    const buffers = Array.from({ length: format.channels }, (x, i) => i).map((ch) => []);
+    let numSamples = 0;
+    let gzSamples = 0;
+    let sampleMag = 0;
+    let chartSampleCount = 0;
+    const samplesPerDetection = format.sampleRate * detectionPeriod;
+    console.log(`Samples per detection: ${samplesPerDetection}`);
+    reader.on('data', (chunk) => {
+        let offset = 0;
         // console.log(`t ${typeof chunk}`);
         while (offset < chunk.length) {
             // for each channel
-            for (var ch = 0; ch < format.channels; ch++) {
+            for (let ch = 0; ch < format.channels; ch++) {
                 // read one sample from one channel
                 if (format.bitDepth === 16) {
-                    var point = Buffer.from([
+                    const point = Buffer.from([
                         chunk[offset++],
                         chunk[offset++],
                     ]).readInt16LE();
+                    // console.log(
+                    //   `s: ${numSamples} t: ${(numSamples / format.sampleRate).toFixed(
+                    //     2
+                    //   )}  ${point}`
+                    // );
                     numSamples++;
                     buffers[ch].push(point);
-                    if (ch === 1 && numSamples < format.sampleRate * 17) {
+                    if (ch === 1) {
+                        //  && numSamples < format.sampleRate * 17) {
                         sampleMag += Math.abs(point);
                         gz.processSample(point);
                         gzSamples++;
                         if (gzSamples >= samplesPerDetection) {
                             //   const toThresh = gz.energies.map()
-                            console.log("t: " + (numSamples / format.sampleRate).toFixed(2) + " mag: " + (sampleMag / numSamples).toFixed(2) + " e: " + JSON.stringify(gz.energies));
+                            if (gz.energies['590'] > 0.09) {
+                                console.log(`s: ${numSamples} t: ${(numSamples / format.sampleRate).toFixed(2)} mag: ${(sampleMag / numSamples).toFixed(2)} e: ${JSON.stringify(gz.energies)}`);
+                            }
                             gzSamples = 0;
                             gz.refresh();
                             sampleMag = 0;
@@ -73,15 +86,58 @@ reader.on("format", function (format) {
             }
         }
         // gz.processSample(buffers[0].slice(-1000));
-        var energies = gz.energies;
+        const energies = gz.energies;
         // console.log(
         //   `Chunk len ${chunk.length} buffLen: ${
         //     buffers[0].length
         //   } energies: ${JSON.stringify(energies)} sample: ${buffers[0].slice(-10)}`
         // );
     });
-    reader.on("end", function () {
-        console.log("end");
+    reader.on('end', () => {
+        console.log(`end`);
+        renderBufferToImage(buffers[0], 0.05, format.sampleRate, 200, 'sampleout.png');
     });
 });
+async function renderBufferToImage(buffer, secondsPerYPixel, sampleRate, height, filename) {
+    const imageWidth = Math.floor(buffer.length / sampleRate / secondsPerYPixel);
+    const canvas = canvas_1.createCanvas(imageWidth, height);
+    console.log(`Image size ${imageWidth}x${height}`);
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.rect(0, 0, imageWidth, height);
+    ctx.fillStyle = 'black';
+    ctx.fill();
+    const samplesPerYPixel = chartSecondsPerYPixel * sampleRate;
+    const chartAccum = { count: 0, absSum: 0, min: 0, max: 0, currentX: 0 };
+    const minValue = -1000;
+    const maxValue = 1000;
+    const scaleToY = (sampleValue) => ((sampleValue - minValue) / (maxValue - minValue)) * height;
+    for (let offset = 0; offset < buffer.length; offset++) {
+        const v = buffer[offset];
+        chartAccum.absSum += Math.abs(v);
+        chartAccum.min = Math.min(chartAccum.min, v);
+        chartAccum.max = Math.max(chartAccum.max, v);
+        chartAccum.count++;
+        if (chartAccum.count >= samplesPerYPixel) {
+            ctx.strokeStyle = 'rgba(255, 241, 147, 1)';
+            ctx.beginPath();
+            // console.log(
+            //   `scaleToMin: ${scaleToY(chartAccum.min)} ... ${scaleToY(
+            //     chartAccum.max
+            //   )}`
+            // );
+            ctx.moveTo(chartAccum.currentX, scaleToY(chartAccum.min));
+            ctx.lineTo(chartAccum.currentX, scaleToY(chartAccum.max));
+            ctx.stroke();
+            chartAccum.currentX++;
+            chartAccum.absSum = 0;
+            chartAccum.max = 0;
+            chartAccum.min = 0;
+        }
+    }
+    const out = fs.createWriteStream(filename);
+    const stream = canvas.createPNGStream();
+    stream.pipe(out);
+    out.on('finish', () => console.log(`PNG file ${filename} created`));
+}
 file.pipe(reader);
