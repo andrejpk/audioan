@@ -113,8 +113,8 @@ async function renderBufferToImage(
   ctx.fill();
   const samplesPerYPixel = chartSecondsPerYPixel * sampleRate;
   const chartAccum = {count: 0, absSum: 0, min: 0, max: 0, currentX: 0};
-  const minValue = -1000;
-  const maxValue = 1000;
+  const minValue = -32768;
+  const maxValue = 32768;
   const scaleToY = (sampleValue: number) =>
     ((sampleValue - minValue) / (maxValue - minValue)) * height;
   for (let offset = 0; offset < buffer.length; offset++) {
@@ -138,6 +138,7 @@ async function renderBufferToImage(
       chartAccum.absSum = 0;
       chartAccum.max = 0;
       chartAccum.min = 0;
+      chartAccum.count = 0;
     }
   }
   const out = fs.createWriteStream(filename);
